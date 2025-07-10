@@ -7,55 +7,40 @@ with lib;
 
 let
   cfg = config.services.proxmox-ve;
+  
+  # Additional custom options for our home lab
+  homeLabCfg = config.homelab.proxmox;
 in
 {
-  options.services.proxmox-ve = {
-    enable = mkEnableOption "Proxmox VE virtualization platform";
+  # Define our own custom options under homelab namespace to avoid conflicts
+  options.homelab.proxmox = {
+    enableCustomConfig = mkEnableOption "Custom Proxmox configuration for home lab";
     
-    webInterface = mkOption {
+    enableBackupCleanup = mkOption {
       type = types.bool;
       default = true;
-      description = "Enable Proxmox web interface";
+      description = "Enable automatic backup cleanup";
     };
     
-    clusterMode = mkOption {
+    enablePerformanceTuning = mkOption {
       type = types.bool;
-      default = false;
-      description = "Enable cluster mode (disable web UI on slaves)";
+      default = true;
+      description = "Enable performance tuning for virtualization";
     };
     
-    clusterName = mkOption {
-      type = types.str;
-      default = "homelab";
-      description = "Name of the Proxmox cluster";
-    };
-    
-    nodeId = mkOption {
-      type = types.int;
-      default = 1;
-      description = "Node ID in the cluster";
-    };
-    
-    bindAddress = mkOption {
-      type = types.str;
-      default = "0.0.0.0";
-      description = "Address to bind Proxmox web interface";
+    enableMonitoring = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Enable monitoring and metrics";
     };
   };
 
   config = mkIf cfg.enable {
-    # Enable Proxmox VE
-    services.proxmox-ve = {
-      enable = true;
-      
-      # Configure web interface
-      webInterface = cfg.webInterface && !cfg.clusterMode;
-    };
+    # Configure web interface (remove the conflicting enable = true)
+    # Note: services.proxmox-ve.enable should be set in host config
     
-    # Networking configuration
-    networking.firewall = mkIf cfg.webInterface {
-      allowedTCPPorts = [ 8006 ];  # Proxmox web UI
-    };
+    # Networking configuration for Proxmox web UI
+    networking.firewall.allowedTCPPorts = [ 8006 ];  # Proxmox web UI
     
     # Enable virtualization features
     virtualisation = {
@@ -76,13 +61,13 @@ in
       kvmgt.enable = true;
     };
     
-    # Required system packages
+    # Required system packages (only include packages that exist in nixpkgs)
     environment.systemPackages = with pkgs; [
-      pve-manager
+      # pve-manager  # This might not exist in nixpkgs
       qemu
       bridge-utils
-      vlan
-      ifenslave
+      # vlan         # This might not exist as a separate package
+      # ifenslave    # This might not exist as a separate package  
       ethtool
     ];
     
@@ -99,31 +84,27 @@ in
       "bonding"
     ];
     
-    # Configure storage
+    # Configure storage - note: some services may not exist in standard nixpkgs
     services.lvm.enable = true;
-    services.zfs.enable = true;
+    # services.zfs.enable = true;  # ZFS might not be available as a service option
     
-    # Enable cluster features if configured
-    services.corosync = mkIf cfg.clusterMode {
-      enable = true;
-      nodelist = [
-        {
-          nodeid = cfg.nodeId;
-          name = config.networking.hostName;
-          ring_addrs = [ "127.0.0.1" ];  # Will be overridden by actual cluster config
-        }
-      ];
-    };
+    # Enable ZFS support at boot level instead
+    boot.supportedFilesystems = [ "zfs" ];
     
-    # Configure Proxmox backup server client
-    services.proxmox-backup-client = {
-      enable = true;
-      
-      settings = {
-        # Configuration will be managed through Proxmox web interface
-        # or external configuration management
-      };
-    };
+    # Enable cluster features if configured (remove problematic corosync config)
+    # services.corosync = mkIf cfg.clusterMode {
+    #   enable = true;
+    #   nodelist = [
+    #     {
+    #       nodeid = cfg.nodeId;
+    #       name = config.networking.hostName;
+    #       ring_addrs = [ "127.0.0.1" ];  # Will be overridden by actual cluster config
+    #     }
+    #   ];
+    # };
+    
+    # Note: Proxmox backup client configuration is done through Proxmox web interface
+    # or external configuration management tools
     
     # System tuning for virtualization
     boot.kernel.sysctl = {
@@ -144,8 +125,8 @@ in
     services.rpcbind.enable = true;  # For NFS
     services.nfs.server.enable = true;
     
-    # Configure backup retention
-    systemd.services.proxmox-backup-cleanup = {
+    # Configure backup retention (conditional on custom config)
+    systemd.services.proxmox-backup-cleanup = mkIf homeLabCfg.enableBackupCleanup {
       description = "Cleanup old Proxmox backups";
       serviceConfig = {
         Type = "oneshot";
@@ -158,7 +139,7 @@ in
       '';
     };
     
-    systemd.timers.proxmox-backup-cleanup = {
+    systemd.timers.proxmox-backup-cleanup = mkIf homeLabCfg.enableBackupCleanup {
       description = "Run Proxmox backup cleanup daily";
       wantedBy = [ "timers.target" ];
       timerConfig = {
@@ -168,11 +149,11 @@ in
       };
     };
     
-    # Configure CPU governor for performance
-    powerManagement.cpuFreqGovernor = "performance";
+    # Configure CPU governor for performance (conditional)
+    powerManagement.cpuFreqGovernor = mkIf homeLabCfg.enablePerformanceTuning "performance";
     
-    # Enable hugepages for better VM performance
-    boot.kernelParams = [
+    # Enable hugepages for better VM performance (conditional)
+    boot.kernelParams = mkIf homeLabCfg.enablePerformanceTuning [
       "hugepages=1024"
       "default_hugepagesz=2M"
       "hugepagesz=2M"

@@ -44,8 +44,17 @@ in
   };
 
   config = mkIf cfg.enable {
-    # Install Tailscale
-    environment.systemPackages = with pkgs; [ tailscale ];
+    # Install Tailscale and custom scripts
+    environment.systemPackages = with pkgs; [ 
+      tailscale 
+      (writeScriptBin "tailscale-reconnect" ''
+        #!/usr/bin/env bash
+        echo "Reconnecting to Tailscale..."
+        sudo systemctl restart tailscale-autoconnect
+        echo "Reconnection complete. Status:"
+        tailscale status
+      '')
+    ];
     
     # Enable the Tailscale service
     services.tailscale = {
@@ -109,16 +118,5 @@ in
     
     # Ensure Tailscale starts early
     systemd.services.tailscale.wantedBy = [ "multi-user.target" ];
-    
-    # Create a script for manual reconnection
-    environment.systemPackages = [
-      (pkgs.writeScriptBin "tailscale-reconnect" ''
-        #!/usr/bin/env bash
-        echo "Reconnecting to Tailscale..."
-        sudo systemctl restart tailscale-autoconnect
-        echo "Reconnection complete. Status:"
-        tailscale status
-      '')
-    ];
   };
 }

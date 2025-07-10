@@ -20,12 +20,17 @@
   outputs = { self, nixpkgs, proxmox-nixos, agenix, ... }:
     let
       system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
+      
+      # Apply overlays to make proxmox packages available
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ proxmox-nixos.overlays.${system} ];
+      };
       
       # Common configuration shared across all hosts
       commonModules = [
         agenix.nixosModules.default
-        ./modules/tailscale.nix
+        # ./modules/tailscale.nix  # Remove custom tailscale module, use built-in
       ];
       
       # Helper function to create a host configuration
@@ -34,6 +39,8 @@
         modules = [
           ./hosts/${hostname}
           proxmox-nixos.nixosModules.proxmox-ve
+          # Apply the overlay to this system correctly
+          { nixpkgs.overlays = [ proxmox-nixos.overlays.${system} ]; }
         ] ++ commonModules ++ modules;
         specialArgs = {
           inherit self;
@@ -45,22 +52,27 @@
       # NixOS configurations for each host
       nixosConfigurations = {
         # ARM control node (Netcup VPS)
-        arm-control = mkHost {
-          hostname = "arm-control";
+        arm-control = nixpkgs.lib.nixosSystem {
           system = "aarch64-linux";
           modules = [
-            ./modules/proxmox-host.nix
+            ./hosts/arm-control
+            proxmox-nixos.nixosModules.proxmox-ve
+            # Apply the overlay for aarch64 system
+            { nixpkgs.overlays = [ proxmox-nixos.overlays."aarch64-linux" ]; }
             ./modules/nginx-proxy-manager.nix
             ./modules/adguard-dns.nix
             ./modules/dashboard.nix
-          ];
+          ] ++ commonModules;
+          specialArgs = {
+            inherit self;
+            proxmox-nixos = proxmox-nixos;
+          };
         };
         
         # x86 slave nodes
         slave-01 = mkHost {
           hostname = "slave-01";
           modules = [
-            ./modules/proxmox-host.nix
             ./modules/reporter.nix
           ];
         };
@@ -68,7 +80,6 @@
         slave-02 = mkHost {
           hostname = "slave-02";
           modules = [
-            ./modules/proxmox-host.nix
             ./modules/reporter.nix
           ];
         };

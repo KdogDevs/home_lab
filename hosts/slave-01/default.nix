@@ -6,14 +6,30 @@
 {
   imports = [
     ./hardware-configuration.nix
+    ../../modules/proxmox-host.nix
   ];
 
   # System configuration
   system.stateVersion = "24.05";
   
+  # Enable Proxmox VE (use only basic options that exist)
+  services.proxmox-ve = {
+    enable = true;
+    ipAddress = "127.0.0.1";  # Default to localhost, will be configured later
+  };
+  
+  # Enable custom home lab Proxmox configuration
+  homelab.proxmox = {
+    enableCustomConfig = true;
+    enableBackupCleanup = true;
+    enablePerformanceTuning = true;
+    enableMonitoring = true;
+  };
+  
   # Networking
   networking = {
     hostName = "slave-01";
+    hostId = "2b83af6d";  # Required for ZFS (8 random hex characters)
     
     # Enable firewall but only allow Tailscale traffic
     firewall = {
@@ -98,7 +114,7 @@
   services.tailscale = {
     enable = true;
     useRoutingFeatures = "client";
-    authKeyFile = "/run/agenix/tailscale-authkey";
+    # authKeyFile = "/run/agenix/tailscale-authkey";  # Commented until agenix secrets are set up
     extraUpFlags = [
       "--ssh"
     ];
